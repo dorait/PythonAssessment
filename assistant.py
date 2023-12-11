@@ -2,7 +2,9 @@ import os
 from typing import Dict
 import asyncio
 from dotenv import load_dotenv
+import re
 import chainlit as cl
+import sqlite3
 from openai import AsyncOpenAI
 from openai.types.beta import Thread
 from openai.types.beta.threads import (
@@ -12,6 +14,14 @@ from openai.types.beta.threads import (
 )
 
 load_dotenv()
+
+conn = sqlite3.connect('score.db')
+c = conn.cursor()
+
+# c.execute("""CREATE TABLE scores(
+#           thread_id str,
+#           score float
+# )""")
 
 api_key = os.environ.get("OPENAI_API_KEY")
 assistant_id = os.environ.get("ASSISTANT_ID")
@@ -42,7 +52,7 @@ async def process_thread_message(
                     display="inline",
                     size="large",
                 ),
-            ]
+            ] 
 
             if id not in message_references:
                 message_references[id] = cl.Message(
@@ -53,13 +63,32 @@ async def process_thread_message(
                 await message_references[id].send()
         else:
             print("unknown message type", type(content_message))
+        
 
+
+        #Score retrieved using regex, and stored in db
+        match_integer= re.findall(r'\d+', content_message.text.value)
+        match_float = re.findall(r'\d+\.\d+', content_message.text.value)
+        score = 0.0
+        if len(match_float) > 0:
+            score = float(match_float[0])
+        elif match_integer and match_integer[0]!= '5' and len(match_integer) > 2:
+            index_5 = match_integer.index('5')
+            score = float(match_integer[index_5-1])
+        elif match_integer and match_integer[0]== '5' and match_integer[1]=='5':
+            score = 5.0
+        else:
+            score = 0.0
+
+        print('score: ', score)
+        c.execute("INSERT INTO scores VALUES (?, ?)", (id, score))
+        conn.commit()
 
 @cl.on_chat_start
 async def start_chat():
     thread = await client.beta.threads.create()
     cl.user_session.set("thread", thread)
-    await cl.Message(author="assistant", content="Ask me anything!").send()
+    await cl.Message(author="assistant", content="Welcome!").send()
 
 @cl.on_message
 async def run_conversation(message_from_ui: cl.Message):
@@ -91,7 +120,7 @@ async def run_conversation(message_from_ui: cl.Message):
             thread_id=thread.id, run_id=run.id, order="asc"
         )
 
-        print(run_steps)
+        # print(run_steps)
 
         for step in run_steps.data:
             # Fetch step details
