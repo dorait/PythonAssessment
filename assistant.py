@@ -1,10 +1,9 @@
 import os
 from typing import Dict
-import asyncio
-from dotenv import load_dotenv
 import re
-import chainlit as cl
 import sqlite3
+from dotenv import load_dotenv
+import chainlit as cl
 from openai import AsyncOpenAI
 from openai.types.beta import Thread
 from openai.types.beta.threads import (
@@ -15,7 +14,7 @@ from openai.types.beta.threads import (
 
 load_dotenv()
 
-conn = sqlite3.connect('score.db')
+conn = sqlite3.connect("score.db")
 c = conn.cursor()
 
 # c.execute("""CREATE TABLE scores(
@@ -26,6 +25,7 @@ c = conn.cursor()
 api_key = os.environ.get("OPENAI_API_KEY")
 assistant_id = os.environ.get("ASSISTANT_ID")
 client = AsyncOpenAI(api_key=api_key)
+
 
 async def process_thread_message(
     message_references: Dict[str, cl.Message], thread_message: ThreadMessage
@@ -52,7 +52,7 @@ async def process_thread_message(
                     display="inline",
                     size="large",
                 ),
-            ] 
+            ]
 
             if id not in message_references:
                 message_references[id] = cl.Message(
@@ -63,32 +63,36 @@ async def process_thread_message(
                 await message_references[id].send()
         else:
             print("unknown message type", type(content_message))
-        
 
-
-        #Score retrieved using regex, and stored in db
-        match_integer= re.findall(r'\d+', content_message.text.value)
-        match_float = re.findall(r'\d+\.\d+', content_message.text.value)
+        # Score retrieved using regex, and stored in db
+        match_integer = re.findall(r"\d+", content_message.text.value)
+        match_float = re.findall(r"\d+\.\d+", content_message.text.value)
         score = 0.0
         if len(match_float) > 0:
             score = float(match_float[0])
-        elif match_integer and match_integer[0]!= '5' and len(match_integer) > 2:
-            index_5 = match_integer.index('5')
-            score = float(match_integer[index_5-1])
-        elif match_integer and match_integer[0]== '5' and match_integer[1]=='5':
+        elif match_integer and match_integer[0] != "5" and len(match_integer) > 2:
+            index_5 = match_integer.index("5")
+            score = float(match_integer[index_5 - 1])
+        elif match_integer and match_integer[0] == "5" and match_integer[1] == "5":
             score = 5.0
         else:
             score = 0.0
 
-        print('score: ', score)
+        print("score: ", score)
         c.execute("INSERT INTO scores VALUES (?, ?)", (id, score))
         conn.commit()
+
+async def find_cumulative_score():
+    c.execute("SELECT SUM(score) as sum_score FROM scores")
+    cumulative_score = c.fetchone()[0]
+    return cumulative_score
 
 @cl.on_chat_start
 async def start_chat():
     thread = await client.beta.threads.create()
     cl.user_session.set("thread", thread)
     await cl.Message(author="assistant", content="Welcome!").send()
+
 
 @cl.on_message
 async def run_conversation(message_from_ui: cl.Message):
@@ -106,7 +110,6 @@ async def run_conversation(message_from_ui: cl.Message):
     run = await client.beta.threads.runs.create(
         thread_id=thread.id, assistant_id=assistant_id
     )
-
     message_references = {}  # type: Dict[str, cl.Message]
 
     # Periodically check for updates
@@ -139,4 +142,7 @@ async def run_conversation(message_from_ui: cl.Message):
         await cl.sleep(1)  # Refresh every second
 
         if run.status in ["cancelled", "failed", "completed", "expired"]:
+            Final_score = await find_cumulative_score()
+            print("Cumulative Score: ", Final_score)
             break
+            
